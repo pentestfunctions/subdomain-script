@@ -1,0 +1,72 @@
+#!/bin/bash
+
+clear
+
+# Prompt for the target if not already set
+if [ -z "$target" ]; then
+    target=$(zenity --entry --text "What is your target?" --title "Set Target Variable" 2>/dev/null)
+fi
+
+# Exit if no target is set
+if [ -z "$target" ]; then
+    echo "No target specified. Exiting."
+    exit 1
+fi
+
+echo "You have chosen: $target"
+
+# Prompt for protocol selection
+protocol=$(zenity --list --title="Select Protocol" --column="Protocol" "http" "https" 2>/dev/null)
+
+# Exit if no protocol is selected
+if [ -z "$protocol" ]; then
+    echo "No protocol selected. Exiting."
+    exit 1
+fi
+
+echo "Protocol selected: $protocol"
+
+temp_output=$(mktemp)
+
+# Run ffuf for a short duration to gather initial data
+echo "Running: timeout 5s ffuf -H \"Host: FUZZ.$target\" -H \"User-Agent: test-agent\" -c -w \"/usr/share/seclists/Discovery/DNS/subdomains-top1million-110000.txt\" -u \"$protocol://$target\""
+timeout --foreground 5s ffuf -H "Host: FUZZ.$target" -H "User-Agent: test-agent" -c -w "/usr/share/seclists/Discovery/DNS/subdomains-top1million-110000.txt" -u "$protocol://$target" > $temp_output 2>&1
+
+echo "First Iteration done... Analyzing for filters"
+
+# Analyze output and create filter strings
+declare -A size_filters word_filters line_filters
+
+# Analyze the ffuf output to find common values
+while IFS= read -r line; do
+    if [[ $line =~ Size:\ ([0-9]+) ]]; then
+        ((size_filters["${BASH_REMATCH[1]}"]++))
+    fi
+    if [[ $line =~ Words:\ ([0-9]+) ]]; then
+        ((word_filters["${BASH_REMATCH[1]}"]++))
+    fi
+    if [[ $line =~ Lines:\ ([0-9]+) ]]; then
+        ((line_filters["${BASH_REMATCH[1]}"]++))
+    fi
+done < <(grep -E 'Size:|Words:|Lines:' "$temp_output")
+
+# Prepare filter strings
+filter_sizes=$(for k in "${!size_filters[@]}"; do [[ "${size_filters[$k]}" -gt 3 ]] && echo "$k"; done | tr '\n' ',' | sed 's/,$//')
+filter_words=$(for k in "${!word_filters[@]}"; do [[ "${word_filters[$k]}" -gt 3 ]] && echo "$k"; done | tr '\n' ',' | sed 's/,$//')
+filter_lines=$(for k in "${!line_filters[@]}"; do [[ "${line_filters[$k]}" -gt 3 ]] && echo "$k"; done | tr '\n' ',' | sed 's/,$//')
+
+filters=""
+[[ -n "$filter_sizes" ]] && filters+=" -fs $filter_sizes"
+[[ -n "$filter_words" ]] && filters+=" -fw $filter_words"
+[[ -n "$filter_lines" ]] && filters+=" -fl $filter_lines"
+
+# Re-run ffuf with filters, if any
+if [ -n "$filters" ]; then
+    echo "Re-running ffuf with added filters: $filters"
+    ffuf -H "Host: FUZZ.$target" -H "User-Agent: test-agent" -c -w "/usr/share/seclists/Discovery/DNS/subdomains-top1million-110000.txt" -u "$protocol://$target" $filters
+else
+    echo "No significant patterns found to apply filters."
+fi
+
+# Cleanup
+rm "$temp_output"
