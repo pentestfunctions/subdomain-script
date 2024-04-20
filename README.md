@@ -4,7 +4,7 @@
   <img src="bg.png">
 </p>
 
-This bash script is designed to quickly filter subdomains for wfuzz, optimizing the process of identifying viable targets by automatically filtering out subdomains with invalid status codes. This script simplifies the first steps in penetration testing and security assessment tasks.
+This bash script is designed to quickly filter subdomains for ffuf, optimizing the process of identifying viable targets by automatically filtering out subdomains with invalid status codes. This script simplifies the first steps in penetration testing and security assessment tasks.
 
 ## Features :sparkles:
 
